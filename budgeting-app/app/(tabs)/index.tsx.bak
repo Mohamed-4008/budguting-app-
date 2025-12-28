@@ -1,0 +1,452 @@
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  SafeAreaView,
+  StatusBar,
+  TouchableOpacity,
+  Dimensions,
+  Animated,
+} from 'react-native';
+import { Link, useRouter } from 'expo-router';
+import { useBudget } from '@/context/budget-context';
+
+// Get screen dimensions
+const { width: screenWidth } = Dimensions.get('window');
+
+export default function DashboardScreen() {
+  const router = useRouter();
+  const { state, dispatch } = useBudget();
+  const [activeTab, setActiveTab] = useState('spending');
+  const scrollViewRef = useRef<ScrollView>(null);
+  const scrollX = useRef(new Animated.Value(0)).current;
+
+  // Get the current target date based on the current month
+  const getCurrentTargetDate = (schedule: any[]) => {
+    if (!schedule || schedule.length === 0) return '';
+    
+    // Get the current date
+    const currentDate = new Date();
+    const currentYear = currentDate.getFullYear();
+    const currentMonth = currentDate.getMonth(); // 0-11
+    
+    // Month name to index mapping
+    const monthNameToIndex: { [key: string]: number } = {
+      'January': 0,
+      'February': 1,
+      'March': 2,
+      'April': 3,
+      'May': 4,
+      'June': 5,
+      'July': 6,
+      'August': 7,
+      'September': 8,
+      'October': 9,
+      'November': 10,
+      'December': 11
+    };
+    
+    // Function to get the last day of a month
+    const getLastDayOfMonth = (monthIndex: number, year: number): number => {
+      return new Date(year, monthIndex + 1, 0).getDate();
+    };
+    
+    // Find the current or next month in the schedule
+    for (let i = 0; i < schedule.length; i++) {
+      const item = schedule[i];
+      const itemMonthIndex = monthNameToIndex[item.month];
+      
+      // Check if this item is for the current month or a future month
+      if (item.year > currentYear || 
+          (item.year === currentYear && itemMonthIndex > currentMonth) ||
+          (item.year === currentYear && itemMonthIndex === currentMonth)) {
+        const monthAbbreviation = item.month.substring(0, 3);
+        const lastDay = getLastDayOfMonth(itemMonthIndex, item.year);
+        return `${monthAbbreviation} ${lastDay}`;
+      }
+    }
+    
+    // If no current or future month found, return the last month in the schedule
+    const lastItem = schedule[schedule.length - 1];
+    if (lastItem) {
+      const monthAbbreviation = lastItem.month.substring(0, 3);
+      const lastDay = getLastDayOfMonth(monthNameToIndex[lastItem.month], lastItem.year);
+      return `${monthAbbreviation} ${lastDay}`;
+    }
+    
+    return '';
+  };
+
+  // Get the current month's payment details
+  const getCurrentMonthPayment = (schedule: any[]) => {
+    if (!schedule || schedule.length === 0) return null;
+    
+    // Get the current date
+    const currentDate = new Date();
+    const currentYear = currentDate.getFullYear();
+    const currentMonth = currentDate.getMonth(); // 0-11
+    
+    // Month name to index mapping
+    const monthNameToIndex: { [key: string]: number } = {
+      'January': 0,
+      'February': 1,
+      'March': 2,
+      'April': 3,
+      'May': 4,
+      'June': 5,
+      'July': 6,
+      'August': 7,
+      'September': 8,
+      'October': 9,
+      'November': 10,
+      'December': 11
+    };
+    
+    // Find the current month in the schedule
+    for (let i = 0; i < schedule.length; i++) {
+      const item = schedule[i];
+      const itemMonthIndex = monthNameToIndex[item.month];
+      
+      // Check if this item is for the current month
+      if (item.year === currentYear && itemMonthIndex === currentMonth) {
+        return item;
+      }
+    }
+    
+    // If current month not found, return the first future month
+    for (let i = 0; i < schedule.length; i++) {
+      const item = schedule[i];
+      const itemMonthIndex = monthNameToIndex[item.month];
+      
+      if (item.year > currentYear || 
+          (item.year === currentYear && itemMonthIndex > currentMonth)) {
+        return item;
+      }
+    }
+    
+    // If no current or future month found, return null (no payment for current context)
+    return null;
+  };
+
+  // Function to format currency without trailing zeros
+  const formatCurrency = (amount: number): string => {
+    if (amount === undefined || amount === null) return '$0';
+    return amount % 1 === 0 ? `$${amount.toFixed(0)}` : `$${amount.toFixed(2)}`;
+  };
+
+  // Handle scroll event to update active tab in real-time
+  const handleScroll = Animated.event(
+    [{ nativeEvent: { contentOffset: { x: scrollX } } }],
+    { useNativeDriver: false }
+  );
+
+  // Determine active tab based on scroll position
+  useEffect(() => {
+    const listener = scrollX.addListener(({ value }) => {
+      const index = Math.round(value / screenWidth);
+      setActiveTab(index === 0 ? 'spending' : 'savings');
+    });
+    
+    return () => {
+      scrollX.removeListener(listener);
+    };
+  }, []);
+
+  // Handle tab press to scroll to the appropriate position
+  const handleTabPress = (tab: string) => {
+    const index = tab === 'spending' ? 0 : 1;
+    scrollViewRef.current?.scrollTo({
+      x: index * screenWidth,
+      animated: true
+    });
+  };
+
+  // Function to format category date - simplified version
+  const formatCategoryDate = (dateString: string): string => {
+    // For monthly categories in "Monthly on X" format, convert to "MMM X" format
+    if (dateString && dateString.startsWith('Monthly on ')) {
+      // Extract the day part (e.g., "7" from "Monthly on 7")
+      const day = parseInt(dateString.replace('Monthly on ', ''), 10);
+      
+      // Get today's date
+      const today = new Date();
+      const todayDate = today.getDate();
+      
+      // If the target day has already passed this month, use next month
+      let targetMonth, targetYear;
+      if (day <= todayDate) {
+        // Use next month
+        targetMonth = today.getMonth() + 1;
+        targetYear = today.getFullYear();
+        // Handle December -> January
+        if (targetMonth > 11) {
+          targetMonth = 0;
+          targetYear++;
+        }
+      } else {
+        // Use current month
+        targetMonth = today.getMonth();
+        targetYear = today.getFullYear();
+      }
+      
+      // Create date object for target month
+      const targetDate = new Date(targetYear, targetMonth, day);
+      
+      // Get the month abbreviation
+      const monthAbbrev = targetDate.toLocaleString('default', { month: 'short' });
+      
+      // Format as "Nov 7" (month abbreviation and day)
+      return `${monthAbbrev} ${day}`;
+    }
+    // For weekly categories in "Weekly on Day" format
+    else if (dateString && dateString.startsWith('Weekly on ')) {
+      // Extract just the day part (e.g., "Mon" from "Weekly on Mon")
+      const day = dateString.replace('Weekly on ', '');
+      
+      // Get the next occurrence of this day
+      const nextDate = getNextDayOccurrence(day);
+      
+      // Format as "Mon 24" (day name and actual next occurrence date)
+      return `${day} ${nextDate.getDate()}`;
+    }
+    // For date formats like "Nov 13" (created by modal)
+    else if (dateString && dateString.includes(' ')) {
+      // This is a date in "Nov 13" format
+      // We need to extract the day and calculate the next occurrence
+      const parts = dateString.split(' ');
+      if (parts.length === 2) {
+        const monthAbbrev = parts[0];
+        const day = parseInt(parts[1], 10);
+        
+        // Get today's date
+        const today = new Date();
+        const todayDate = today.getDate();
+        
+        // If the target day has already passed this month, use next month
+        let targetMonth, targetYear;
+        if (day <= todayDate) {
+          // Use next month
+          targetMonth = today.getMonth() + 1;
+          targetYear = today.getFullYear();
+          // Handle December -> January
+          if (targetMonth > 11) {
+            targetMonth = 0;
+            targetYear++;
+          }
+        } else {
+          // Use current month
+          targetMonth = today.getMonth();
+          targetYear = today.getFullYear();
+        }
+        
+        // Create date object for target month
+        const targetDate = new Date(targetYear, targetMonth, day);
+        
+        // Get the month abbreviation
+        const newMonthAbbrev = targetDate.toLocaleString('default', { month: 'short' });
+        
+        // Format as "Nov 7" (month abbreviation and day)
+        return `${newMonthAbbrev} ${day}`;
+      }
+      return dateString;
+    }
+    // For all other date formats, return as is
+    return dateString;
+  };
+
+  // Function to get the next occurrence of a specific day of the week
+  const getNextDayOccurrence = (day: string): Date => {
+    const daysMap: { [key: string]: number } = {
+      'Sun': 0,
+      'Mon': 1,
+      'Tue': 2,
+      'Wed': 3,
+      'Thu': 4,
+      'Fri': 5,
+      'Sat': 6
+    };
+    
+    const today = new Date();
+    const todayDay = today.getDay(); // 0 (Sunday) to 6 (Saturday)
+    const targetDay = daysMap[day];
+    
+    // Calculate days until next occurrence
+    let daysUntil = targetDay - todayDay;
+    
+    // If the day has already passed this week or is today, add 7 days to get next week
+    if (daysUntil <= 0) {
+      daysUntil += 7;
+    }
+    
+    // Create new date with the next occurrence
+    const nextDate = new Date(today);
+    nextDate.setDate(today.getDate() + daysUntil);
+    
+    return nextDate;
+  };
+
+  // Function to get the next occurrence of a specific day of the month
+  const getNextMonthOccurrence = (day: number): Date => {
+    const today = new Date();
+    const todayDate = today.getDate();
+    
+    // If the target day has already passed this month, use next month
+    if (day <= todayDate) {
+      // Create date for the same day next month
+      const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, day);
+      return nextMonth;
+    }
+    // If the target day is in the future this month, use this month
+    else {
+      // Create date for the target day this month
+      const thisMonth = new Date(today.getFullYear(), today.getMonth(), day);
+      return thisMonth;
+    }
+  };
+
+  // Function to calculate status amount for savings
+  const calculateStatusAmount = (saved: number, target: number): string => {
+    // If saved equals target, show $0 (no more needed)
+    if (saved >= target) {
+      return '$0';
+    }
+    // Otherwise show the remaining amount needed
+    const remaining = target - saved;
+    return formatCurrency(remaining);
+  };
+
+  // Handle add button press - navigate to new expense screen as modal
+  const handleAddPress = () => {
+    if (activeTab === 'spending') {
+      router.push('/modal');
+    } else if (activeTab === 'savings') {
+      router.push('/savings-modal');
+    }
+  };
+
+  const CategoryItem = ({ category }: { category: any }) => {
+    const spent = category.spent || 0;
+    // For weekly categories, convert target to monthly equivalent for calculations
+    const isWeekly = category.date && category.date.startsWith('Weekly on ');
+    const target = isWeekly && category.target ? category.target * 4.33 : (category.target || 0);
+    const progress = target > 0 ? (spent / target) * 100 : 0;
+    
+    // Determine progress bar color based on spending percentage
+    let progressBarColor = '#4ADE80'; // Green (0-89.99%)
+    if (progress >= 90 && progress < 100) {
+      progressBarColor = '#F59E0B'; // Orange (90-99.99%)
+    } else if (progress >= 100) {
+      progressBarColor = '#F87171'; // Red (100%+)
+    }
+    
+    return (
+      <TouchableOpacity 
+        style={styles.categoryItem}
+        onPress={() => router.push({
+          pathname: '/spending-category-details' as any,
+          params: { categoryName: category.name }
+        })}
+      >
+        {/* Line 1 */}
+        <View style={styles.categoryLine1}>
+          <Text style={styles.categoryName}>{category.name}</Text>
+          <Text style={[
+            styles.statusAmount,
+            category.status === 'remaining' ? styles.remainingAmount : styles.overAmount
+          ]}>
+            {category.status === 'remaining' ? formatCurrency(category.statusAmount) : formatCurrency(category.statusAmount)}
+          </Text>
+        </View>
+        
+        {/* Line 2 */}
+        <View style={styles.categoryLine2}>
+          <Text style={styles.categoryDate}>{formatCategoryDate(category.date)}</Text>
+          <Text style={[
+            styles.statusText,
+            category.status === 'remaining' ? styles.remainingText : styles.overText
+          ]}>
+            {category.status === 'remaining' ? 'Remaining' : 'Over Budget'}
+          </Text>
+        </View>
+        
+        {/* Line 3 */}
+        <View style={styles.categoryLine3}>
+          <Text style={styles.spentTarget}>
+            {formatCurrency(spent)} / {formatCurrency(target)}
+          </Text>
+        </View>
+        
+        {/* Line 4 - Progress Bar */}
+        <View style={styles.progressBarContainer}>
+          <View 
+            style={[
+              styles.progressBar,
+              { 
+                width: `${Math.min(progress, 100)}%`,
+                backgroundColor: progressBarColor
+              }
+            ]} 
+          />
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  const SavingsCategoryItem = ({ category }: { category: any }) => {
+    // Calculate progress percentages with safety checks
+    const generalSaved = category.generalSaved || 0;
+    const generalTarget = category.generalTarget || 0;
+    
+    // Add defensive check to prevent incorrect achievement status
+    const isGeneralTargetAchieved = generalTarget > 0.01 && generalSaved >= generalTarget;
+    
+    // Use the current month's actual payment amount from payment schedule
+    const currentMonthPayment = category.paymentSchedule ? getCurrentMonthPayment(category.paymentSchedule) : null;
+    
+    // Get the next month's payment if current month is not found
+    let nextMonthPayment = null;
+    if (!currentMonthPayment && category.paymentSchedule && category.paymentSchedule.length > 0) {
+      // Get the current date
+      const currentDate = new Date();
+      const currentYear = currentDate.getFullYear();
+      const currentMonth = currentDate.getMonth(); // 0-11
+      
+      // Month name to index mapping
+      const monthNameToIndex: { [key: string]: number } = {
+        'January': 0,
+        'February': 1,
+        'March': 2,
+        'April': 3,
+        'May': 4,
+        'June': 5,
+        'July': 6,
+        'August': 7,
+        'September': 8,
+        'October': 9,
+        'November': 10,
+        'December': 11
+      };
+      
+      // Find the first future month in the schedule
+      for (let i = 0; i < category.paymentSchedule.length; i++) {
+        const item = category.paymentSchedule[i];
+        const itemMonthIndex = monthNameToIndex[item.month];
+        
+        if (item.year > currentYear || 
+            (item.year === currentYear && itemMonthIndex >= currentMonth)) {
+          nextMonthPayment = item;
+          break;
+        }
+      }
+      
+      // If no future month found, use the first month in schedule
+      if (!nextMonthPayment) {
+        nextMonthPayment = category.paymentSchedule[0];
+      }
+    }
+    
+    const monthlySaved = category.monthlySaved || 0;
+    // Use next month's payment if current month not found, otherwise use current month's payment
+    const targetPayment = nextMonthPayment || currentMonthPayment;
